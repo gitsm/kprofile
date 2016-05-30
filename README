@@ -1,0 +1,120 @@
+This directory has the sources for profiling linux system calls and memory leaks 
+in the linux kernel. There is a memory leak simulator which leaks memory on a module
+load and unleaks on a module unload. Here are a brief specifics of the files:
+
+profiler.c 
+    - sysfs framework for exporting profiling stats to the user space
+    - sysfs endpoint to configure memory scan start and end addresses 
+      to search for potential alloced but not freed memroy
+    - kprobes mechanism for profiling and collecting stats for system calls
+
+memtrace.c
+    - kretprobes mechanism for collecting memory alloc stats
+    - jprobe mechanism for collecting memory free stats
+   
+memleaks_sim.c
+    - simulate 16 vmalloc()s of PAGE_SIZE that are not freed on module load
+    - free the vmalloc()-ed memory blocks on a module unload
+
+Makefile
+    - builds profile.ko, memtrace.ko, and memleaks_sim.ko
+   
+profile.h
+    - common #defines and structure definitions
+
+README
+    - documentation 
+
+building/installing/uninstalling
+
+   tar -zxvf linux-sm.tar.gz
+   cd linux-sm/ 
+   make clean
+   make
+   sudo insmod profiler.ko funcs=sys_clone,sys_getpid
+   sudo insmod memtrace.ko
+   sudo insmod memleak_sim.ko
+   sudo rmmod memleak_sim
+   sudo rmmod memtrace 
+   sudo rmmod profiler
+   Note: The order of module load has to be strictly in this order: profiler.ko, 
+         memtrace.ko and memleaks.ko. The module unload has to be in the strict 
+         reverse order: memleak, memtrace, profiler.
+
+**sample build output on my home build machine
+
+	~/linux-sm$ make clean
+	make -C /lib/modules/3.13.0-46-generic/build M=/home/smuthuswamy/linux-sm clean
+	make[1]: Entering directory `/usr/src/linux-headers-3.13.0-46-generic'
+	make[1]: Leaving directory `/usr/src/linux-headers-3.13.0-46-generic'
+	~/linux-sm$ make
+	make -C /lib/modules/3.13.0-46-generic/build M=/home/smuthuswamy/linux-sm modules
+	make[1]: Entering directory `/usr/src/linux-headers-3.13.0-46-generic'
+ 	 CC [M]  /home/smuthuswamy/linux-sm/profiler.o
+  	 CC [M]  /home/smuthuswamy/linux-sm/memtrace.o
+ 	 CC [M]  /home/smuthuswamy/linux-sm/memleak_sim.o
+	  Building modules, stage 2.
+ 	  MODPOST 3 modules
+ 	 CC      /home/smuthuswamy/linux-sm/memleak_sim.mod.o
+  	 LD [M]  /home/smuthuswamy/linux-sm/memleak_sim.ko
+  	 CC      /home/smuthuswamy/linux-sm/memtrace.mod.o
+  	 LD [M]  /home/smuthuswamy/linux-sm/memtrace.ko
+  	 CC      /home/smuthuswamy/linux-sm/profiler.mod.o
+  	 LD [M]  /home/smuthuswamy/linux-sm/profiler.ko
+ 	make[1]: Leaving directory `/usr/src/linux-headers-3.13.0-46-generic'
+	~/linux-sm$ uname -a
+	Linux smuthuswamy-desktop 3.13.0-46-generic #79-Ubuntu SMP Tue Mar 10 20:08:14 UTC 2015 i686 i686 i686 GNU/Linux
+  
+
+testing/sample outputs
+
+  - system call profiling
+
+	    ~/linux-sm$ sudo insmod profiler.ko funcs=sys_mkdir,sys_rmdir,sys_clone
+   	    ~/linux-sm$ cat /sys/class/linux/profiler/stats 
+                        sys_clone:5561:2
+            ~/linux-sm$ mkdir t1 t2 t3
+            ~/linux-sm$ cat /sys/class/linux/profiler/stats 
+                        sys_mkdir:4990:3
+                        sys_clone:6358:5
+            ~/linux-sm$ rmdir t1 t2 t3
+            ~/linux-sm$ cat /sys/class/linux/profiler/stats 
+                        sys_mkdir:4990:3
+                        sys_rmdir:5156:3
+                        sys_clone:6551:7
+  
+  - memory trace profiling
+	    ~/linux-sm$ sudo insmod memtrace.ko
+	    ~/linux-sm$ sudo insmod memleaks_sim.ko
+   	    ~/linux-sm$ tail -f /var/log/syslog [below snipet copied from syslog]
+
+		May 25 05:08:00 smuthuswamy-desktop kernel: [ 6096.676520] vmalloc returned ptr=f8428000 and took 4487 ns to execute
+		May 25 05:08:00 smuthuswamy-desktop kernel: [ 6096.676526] vmalloc returned ptr=f8435000 and took 1594 ns to execute
+		May 25 05:08:00 smuthuswamy-desktop kernel: [ 6096.676530] vmalloc returned ptr=f8456000 and took 1469 ns to execute
+		May 25 05:08:00 smuthuswamy-desktop kernel: [ 6096.676534] vmalloc returned ptr=f84be000 and took 1143 ns to execute
+		May 25 05:08:00 smuthuswamy-desktop kernel: [ 6096.676538] vmalloc returned ptr=f84ca000 and took 1544 ns to execute
+		May 25 05:08:00 smuthuswamy-desktop kernel: [ 6096.676542] vmalloc returned ptr=f8504000 and took 1338 ns to execute
+		May 25 05:08:00 smuthuswamy-desktop kernel: [ 6096.676546] vmalloc returned ptr=f8506000 and took 1153 ns to execute
+		May 25 05:08:00 smuthuswamy-desktop kernel: [ 6096.676550] vmalloc returned ptr=f850e000 and took 1469 ns to execute
+		May 25 05:08:00 smuthuswamy-desktop kernel: [ 6096.676554] vmalloc returned ptr=f8529000 and took 1163 ns to execute
+		May 25 05:08:00 smuthuswamy-desktop kernel: [ 6096.676558] vmalloc returned ptr=f853d000 and took 1429 ns to execute
+		May 25 05:08:00 smuthuswamy-desktop kernel: [ 6096.676562] vmalloc returned ptr=f85a9000 and took 1414 ns to execute
+		May 25 05:08:00 smuthuswamy-desktop kernel: [ 6096.676566] vmalloc returned ptr=f85ba000 and took 1098 ns to execute
+		May 25 05:08:00 smuthuswamy-desktop kernel: [ 6096.676569] vmalloc returned ptr=f85bc000 and took 1027 ns to execute
+		May 25 05:08:00 smuthuswamy-desktop kernel: [ 6096.676573] vmalloc returned ptr=f85be000 and took 1654 ns to execute
+		May 25 05:08:00 smuthuswamy-desktop kernel: [ 6096.676577] vmalloc returned ptr=f85c0000 and took 1178 ns to execute
+		May 25 05:08:00 smuthuswamy-desktop kernel: [ 6096.676581] vmalloc returned ptr=f85c2000 and took 1193 ns to execute
+
+	    ~/linux-sm$ echo f8400000 > /sys/class/linux/profiler/scan_start_addr
+	    ~/linux-sm$ echo f84f0000 > /sys/class/linux/profiler/scan_end_addr
+            ~/linux-sm$ cat /sys/class/linux/profiler/memleaks 
+                        f8428000:<possible leak or not freed yet>:c1154000
+                        f8435000:<possible leak or not freed yet>:c1154000
+                        f8456000:<possible leak or not freed yet>:c1154000
+                        f84be000:<possible leak or not freed yet>:c1154000
+                        f84ca000:<possible leak or not freed yet>:c1154000
+ 
+	    ~/linux-sm$ sudo rmmod memleaks_sim
+            ~/linux-sm$ cat /sys/class/linux/profiler/memleaks 
+
+Note: Extensive debug information will be logged to /var/log/syslog 
